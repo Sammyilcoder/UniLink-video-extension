@@ -81,7 +81,9 @@ function showFeedback(doc, message, actionType = 'default') {
 function formatMagnitude(value) {
   const absValue = Math.abs(value);
   const fixed = absValue % 1 === 0 ? absValue.toFixed(0) : absValue.toFixed(2);
-  return fixed.replace(/\.?0+$/, "");
+  // Only remove trailing zeros after decimal point, not from whole numbers
+  const result = fixed.replace(/(\.\d*?)0+$/, '$1').replace(/\.$/, '');
+  return result;
 }
 
 function formatDelta(value, suffix) {
@@ -89,7 +91,9 @@ function formatDelta(value, suffix) {
     return `0${suffix}`;
   }
   const sign = value > 0 ? "+" : "-";
-  return `${sign}${formatMagnitude(value)}${suffix}`;
+  const magnitude = formatMagnitude(value);
+  const result = `${sign}${magnitude}${suffix}`;
+  return result;
 }
 
 function formatSpeed(value) {
@@ -128,21 +132,20 @@ function log(message, level) {
 
 chrome.storage.sync.get(tc.settings, function (storage) {
   const speedStep = Number(storage.speedStep) || 0.25;
-  const rewindStep = Number(storage.rewindTime) || 10;
-  const advanceStep = Number(storage.advanceTime) || rewindStep;
+  const seekStep = Number(storage.rewindTime) || Number(storage.advanceTime) || 10;
 
   tc.settings.keyBindings = [
     {
       action: "rewind",
       key: 37,
-      value: rewindStep,
+      value: seekStep,
       force: true,
       predefined: true
     },
     {
       action: "advance",
       key: 39,
-      value: advanceStep,
+      value: seekStep,
       force: true,
       predefined: true
     },
