@@ -1,63 +1,73 @@
 document.addEventListener("DOMContentLoaded", function () {
-  document.querySelector("#config").addEventListener("click", function () {
-    window.open(chrome.runtime.getURL("options.html"));
-  });
+  const seekStepInput = document.getElementById('seekStep');
+  const speedStepInput = document.getElementById('speedStep');
+  const resetButton = document.getElementById('reset');
+  const saveButton = document.getElementById('save');
+  const status = document.getElementById('status');
 
-  document.querySelector("#about").addEventListener("click", function () {
-    window.open("https://github.com/codebicycle/videospeed");
-  });
+  // Default values
+  const defaults = {
+    rewindTime: 10,
+    speedStep: 0.25
+  };
 
-  document.querySelector("#feedback").addEventListener("click", function () {
-    window.open("https://github.com/codebicycle/videospeed/issues");
-  });
+  // Load current settings
+  loadSettings();
 
-  document.querySelector("#enable").addEventListener("click", function () {
-    toggleEnabled(true, settingsSavedReloadMessage);
-  });
+  // Event listeners
+  resetButton.addEventListener('click', resetToDefaults);
+  saveButton.addEventListener('click', saveSettings);
 
-  document.querySelector("#disable").addEventListener("click", function () {
-    toggleEnabled(false, settingsSavedReloadMessage);
-  });
-
-  chrome.storage.sync.get({ enabled: true }, function (storage) {
-    toggleEnabledUI(storage.enabled);
-  });
-
-  function toggleEnabled(enabled, callback) {
-    chrome.storage.sync.set(
-      {
-        enabled: enabled
-      },
-      function () {
-        toggleEnabledUI(enabled);
-        if (callback) callback(enabled);
-      }
-    );
-  }
-
-  function toggleEnabledUI(enabled) {
-    document.querySelector("#enable").classList.toggle("hide", enabled);
-    document.querySelector("#disable").classList.toggle("hide", !enabled);
-
-    const suffix = `${enabled ? "" : "_disabled"}.png`;
-    chrome.browserAction.setIcon({
-      path: {
-        "19": "icons/icon19" + suffix,
-        "38": "icons/icon38" + suffix,
-        "48": "icons/icon48" + suffix
-      }
+  function loadSettings() {
+    chrome.storage.sync.get(defaults, function(storage) {
+      seekStepInput.value = storage.rewindTime || defaults.rewindTime;
+      speedStepInput.value = storage.speedStep || defaults.speedStep;
     });
   }
 
-  function settingsSavedReloadMessage(enabled) {
-    setStatusMessage(
-      `${enabled ? "Enabled" : "Disabled"}. Reload page to see changes`
-    );
+  function resetToDefaults() {
+    seekStepInput.value = defaults.rewindTime;
+    speedStepInput.value = defaults.speedStep;
+    showStatus('Settings reset to defaults', 'success');
   }
 
-  function setStatusMessage(str) {
-    const status_element = document.querySelector("#status");
-    status_element.classList.toggle("hide", false);
-    status_element.innerText = str;
+  function saveSettings() {
+    const seekStep = parseInt(seekStepInput.value);
+    const speedStep = parseFloat(speedStepInput.value);
+
+    // Validation
+    if (seekStep < 1 || seekStep > 60) {
+      showStatus('Skip step must be between 1 and 60 seconds', 'error');
+      return;
+    }
+
+    if (speedStep < 0.05 || speedStep > 1) {
+      showStatus('Playback rate step must be between 0.05 and 1', 'error');
+      return;
+    }
+
+    // Save to storage
+    chrome.storage.sync.set({
+      rewindTime: seekStep,
+      advanceTime: seekStep, // Keep both for compatibility
+      speedStep: speedStep
+    }, function() {
+      showStatus('Settings saved successfully!', 'success');
+      
+      // Hide status after 2 seconds
+      setTimeout(() => {
+        hideStatus();
+      }, 2000);
+    });
+  }
+
+  function showStatus(message, type) {
+    status.textContent = message;
+    status.className = `status ${type}`;
+    status.classList.remove('hidden');
+  }
+
+  function hideStatus() {
+    status.classList.add('hidden');
   }
 });
