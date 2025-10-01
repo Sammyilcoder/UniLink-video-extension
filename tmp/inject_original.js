@@ -27,75 +27,6 @@ var tc = {
   // Holds a reference to all of the AUDIO/VIDEO DOM elements we've attached to
   mediaElements: []
 };
-const FEEDBACK_ELEMENT_ID = "uv-feedback";
-const FEEDBACK_VISIBLE_CLASS = "uv-visible";
-const FEEDBACK_DURATION = 700;
-const feedbackElements = new WeakMap();
-const feedbackTimers = new WeakMap();
-
-function ensureFeedbackElement(doc) {
-  let el = feedbackElements.get(doc);
-  if (el && el.isConnected) {
-    return el;
-  }
-  el = doc.getElementById(FEEDBACK_ELEMENT_ID);
-  if (!el) {
-    el = doc.createElement("div");
-    el.id = FEEDBACK_ELEMENT_ID;
-    const container = doc.body || doc.documentElement || doc;
-    container.appendChild(el);
-  }
-  feedbackElements.set(doc, el);
-  return el;
-}
-
-function showFeedback(doc, message, actionType = 'default') {
-  const el = ensureFeedbackElement(doc);
-  el.textContent = message;
-  
-  // Remove existing action classes
-  el.classList.remove('uv-seek', 'uv-speed', 'uv-default');
-  
-  // Add appropriate action class
-  if (actionType === 'seek') {
-    el.classList.add('uv-seek');
-  } else if (actionType === 'speed') {
-    el.classList.add('uv-speed');
-  } else {
-    el.classList.add('uv-default');
-  }
-  
-  el.classList.add(FEEDBACK_VISIBLE_CLASS);
-  const win = doc.defaultView || window;
-  const existingTimer = feedbackTimers.get(doc);
-  if (existingTimer) {
-    win.clearTimeout(existingTimer);
-  }
-  const timer = win.setTimeout(() => {
-    el.classList.remove(FEEDBACK_VISIBLE_CLASS);
-    feedbackTimers.delete(doc);
-  }, FEEDBACK_DURATION);
-  feedbackTimers.set(doc, timer);
-}
-
-function formatMagnitude(value) {
-  const absValue = Math.abs(value);
-  const fixed = absValue % 1 === 0 ? absValue.toFixed(0) : absValue.toFixed(2);
-  return fixed.replace(/\.?0+$/, "");
-}
-
-function formatDelta(value, suffix) {
-  if (value === 0) {
-    return `0${suffix}`;
-  }
-  const sign = value > 0 ? "+" : "-";
-  return `${sign}${formatMagnitude(value)}${suffix}`;
-}
-
-function formatSpeed(value) {
-  return formatMagnitude(value);
-}
-
 
 /* Log levels (depends on caller specifying the correct level)
   1 - none
@@ -127,48 +58,67 @@ function log(message, level) {
 }
 
 chrome.storage.sync.get(tc.settings, function (storage) {
-  const speedStep = Number(storage.speedStep) || 0.25;
-  const rewindStep = Number(storage.rewindTime) || 10;
-  const advanceStep = Number(storage.advanceTime) || rewindStep;
-
-  tc.settings.keyBindings = [
-    {
-      action: "rewind",
-      key: 37,
-      value: rewindStep,
-      force: true,
-      predefined: true
-    },
-    {
-      action: "advance",
-      key: 39,
-      value: advanceStep,
-      force: true,
-      predefined: true
-    },
-    {
+  tc.settings.keyBindings = storage.keyBindings; // Array
+  if (storage.keyBindings.length == 0) {
+    // if first initialization of 0.5.3
+    // UPDATE
+    tc.settings.keyBindings.push({
       action: "slower",
-      key: 40,
-      value: speedStep,
-      force: true,
+      key: Number(storage.slowerKeyCode) || 83,
+      value: Number(storage.speedStep) || 0.1,
+      force: false,
       predefined: true
-    },
-    {
+    }); // default S
+    tc.settings.keyBindings.push({
       action: "faster",
-      key: 38,
-      value: speedStep,
-      force: true,
+      key: Number(storage.fasterKeyCode) || 68,
+      value: Number(storage.speedStep) || 0.1,
+      force: false,
       predefined: true
-    }
-  ];
+    }); // default: D
+    tc.settings.keyBindings.push({
+      action: "rewind",
+      key: Number(storage.rewindKeyCode) || 90,
+      value: Number(storage.rewindTime) || 10,
+      force: false,
+      predefined: true
+    }); // default: Z
+    tc.settings.keyBindings.push({
+      action: "advance",
+      key: Number(storage.advanceKeyCode) || 88,
+      value: Number(storage.advanceTime) || 10,
+      force: false,
+      predefined: true
+    }); // default: X
+    tc.settings.keyBindings.push({
+      action: "reset",
+      key: Number(storage.resetKeyCode) || 82,
+      value: 1.0,
+      force: false,
+      predefined: true
+    }); // default: R
+    tc.settings.keyBindings.push({
+      action: "fast",
+      key: Number(storage.fastKeyCode) || 71,
+      value: Number(storage.fastSpeed) || 1.8,
+      force: false,
+      predefined: true
+    }); // default: G
+    tc.settings.version = "0.5.3";
 
-  tc.settings.version = "0.6.4.0";
-
-  chrome.storage.sync.set({
-    keyBindings: tc.settings.keyBindings,
-    version: tc.settings.version
-  });
-
+    chrome.storage.sync.set({
+      keyBindings: tc.settings.keyBindings,
+      version: tc.settings.version,
+      displayKeyCode: tc.settings.displayKeyCode,
+      rememberSpeed: tc.settings.rememberSpeed,
+      forceLastSavedSpeed: tc.settings.forceLastSavedSpeed,
+      audioBoolean: tc.settings.audioBoolean,
+      startHidden: tc.settings.startHidden,
+      enabled: tc.settings.enabled,
+      controllerOpacity: tc.settings.controllerOpacity,
+      blacklist: tc.settings.blacklist.replace(regStrip, "")
+    });
+  }
   tc.settings.lastSpeed = Number(storage.lastSpeed);
   tc.settings.displayKeyCode = Number(storage.displayKeyCode);
   tc.settings.rememberSpeed = Boolean(storage.rememberSpeed);
@@ -179,37 +129,34 @@ chrome.storage.sync.get(tc.settings, function (storage) {
   tc.settings.controllerOpacity = Number(storage.controllerOpacity);
   tc.settings.blacklist = String(storage.blacklist);
 
+  // ensure that there is a "display" binding (for upgrades from versions that had it as a separate binding)
+  if (
+    tc.settings.keyBindings.filter((x) => x.action == "display").length == 0
+  ) {
+    tc.settings.keyBindings.push({
+      action: "display",
+      key: Number(storage.displayKeyCode) || 86,
+      value: 0,
+      force: false,
+      predefined: true
+    }); // default V
+  }
+
   initializeWhenReady(document);
 });
 
 function getKeyBindings(action, what = "value") {
-  const binding = tc.settings.keyBindings.find((item) => item.action === action);
-  if (!binding) {
-    log(`Missing key binding for action: ${action}`, 4);
+  try {
+    return tc.settings.keyBindings.find((item) => item.action === action)[what];
+  } catch (e) {
     return false;
   }
-  if (!(what in binding)) {
-    log(`Key binding property not found: ${action}.${what}`, 4);
-    return false;
-  }
-  return binding[what];
 }
 
 function setKeyBindings(action, value) {
-  let binding = tc.settings.keyBindings.find((item) => item.action === action);
-  if (!binding) {
-    binding = {
-      action,
-      key: null,
-      value,
-      force: false,
-      predefined: false
-    };
-    tc.settings.keyBindings.push(binding);
-    log(`Created placeholder key binding for action: ${action}`, 4);
-  } else {
-    binding.value = value;
-  }
+  tc.settings.keyBindings.find((item) => item.action === action)[
+    "value"
+  ] = value;
 }
 
 function defineVideoController() {
@@ -353,10 +300,10 @@ function defineVideoController() {
     }">
           <span data-action="drag" class="draggable">${speed}</span>
           <span id="controls">
-            <button data-action="rewind" class="rw">&laquo;</button>
+            <button data-action="rewind" class="rw">┬½</button>
             <button data-action="slower">&minus;</button>
             <button data-action="faster">&plus;</button>
-            <button data-action="advance" class="rw">&raquo;</button>
+            <button data-action="advance" class="rw">┬╗</button>
             <button data-action="display" class="hideButton">&times;</button>
           </span>
         </div>
@@ -496,6 +443,8 @@ function setupListener() {
     chrome.storage.sync.set({ lastSpeed: speed }, function () {
       log("Speed setting saved: " + speed, 5);
     });
+    // show the controller for 1000ms if it's hidden.
+    runAction("blink", null, null);
   }
 
   document.addEventListener(
@@ -641,7 +590,7 @@ function initializeNow(document) {
         var item = tc.settings.keyBindings.find((item) => item.key === keyCode);
         if (item) {
           runAction(item.action, item.value);
-          if (item.force === true) {
+          if (item.force === "true") {
             // disable websites key bindings
             event.preventDefault();
             event.stopPropagation();
@@ -664,7 +613,6 @@ function initializeNow(document) {
       (node.nodeName === "AUDIO" && tc.settings.audioBoolean)
     ) {
       if (added) {
-        console.info('[UniLink] video detected', node);
         node.vsc = new tc.videoController(node, parent);
       } else {
         if (node.vsc) {
@@ -776,69 +724,37 @@ function runAction(action, value, e) {
   }
 
   mediaTags.forEach(function (v) {
-    if (!v.vsc || !v.vsc.div) {
-      log("Skipping media without attached controller", 4);
-      return;
-    }
     var controller = v.vsc.div;
-    const doc = v.ownerDocument || document;
 
     // Don't change video speed if the video has a different controller
     if (e && !(targetController == controller)) {
       return;
     }
 
+    showController(controller);
+
     if (!v.classList.contains("vsc-cancelled")) {
       if (action === "rewind") {
         log("Rewind", 5);
-        const step = Number(value) || 0;
-        const start = v.currentTime;
-        const target = Math.max(0, start - step);
-        v.currentTime = target;
-        const actualChange = v.currentTime - start;
-        // Show the intended step value instead of actual change
-        showFeedback(doc, formatDelta(-step, "s"), "seek");
+        v.currentTime -= value;
       } else if (action === "advance") {
         log("Fast forward", 5);
-        const step = Number(value) || 0;
-        const start = v.currentTime;
-        const duration = Number.isFinite(v.duration) ? v.duration : Infinity;
-        const target = Math.min(duration, Math.max(0, start + step));
-        v.currentTime = target;
-        const actualChange = v.currentTime - start;
-        // Show the intended step value instead of actual change
-        showFeedback(doc, formatDelta(step, "s"), "seek");
+        v.currentTime += value;
       } else if (action === "faster") {
         log("Increase speed", 5);
         // Maximum playback speed in Chrome is set to 16:
         // https://cs.chromium.org/chromium/src/third_party/blink/renderer/core/html/media/html_media_element.cc?gsn=kMinRate&l=166
-        const step = Number(value) || 0;
-        const initialRate = v.playbackRate;
-        const nextRate = Math.min(
-          (initialRate < 0.1 ? 0.0 : initialRate) + step,
+        var s = Math.min(
+          (v.playbackRate < 0.1 ? 0.0 : v.playbackRate) + value,
           16
         );
-        setSpeed(v, nextRate);
-        const actualChange = v.playbackRate - initialRate;
-        const message =
-          actualChange === 0
-            ? `${formatSpeed(v.playbackRate)}x`
-            : `${formatDelta(actualChange, "x")} (${formatSpeed(v.playbackRate)}x)`;
-        showFeedback(doc, message, "speed");
+        setSpeed(v, s);
       } else if (action === "slower") {
         log("Decrease speed", 5);
         // Video min rate is 0.0625:
         // https://cs.chromium.org/chromium/src/third_party/blink/renderer/core/html/media/html_media_element.cc?gsn=kMinRate&l=165
-        const step = Number(value) || 0;
-        const initialRate = v.playbackRate;
-        const nextRate = Math.max(initialRate - step, 0.07);
-        setSpeed(v, nextRate);
-        const actualChange = v.playbackRate - initialRate;
-        const message =
-          actualChange === 0
-            ? `${formatSpeed(v.playbackRate)}x`
-            : `${formatDelta(actualChange, "x")} (${formatSpeed(v.playbackRate)}x)`;
-        showFeedback(doc, message, "speed");
+        var s = Math.max(v.playbackRate - value, 0.07);
+        setSpeed(v, s);
       } else if (action === "reset") {
         log("Reset speed", 5);
         resetSpeed(v, 1.0);
@@ -986,4 +902,3 @@ function showController(controller) {
     log("Hiding controller", 5);
   }, 2000);
 }
-

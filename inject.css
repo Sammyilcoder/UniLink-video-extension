@@ -94,3 +94,48 @@ div.legacy-video-player.has_played.vertically_center:before {
 .Shared-Video-player > .vsc-controller {
   height: 0;
 }
+.vsc-controller {
+  display: none !important;
+}
+
+#uv-feedback {
+  position: fixed;
+  top: 24px;
+  right: 24px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.8);
+  color: #ffffff;
+  font-size: 16px;
+  font-weight: 600;
+  pointer-events: none;
+  opacity: 0;
+  transform: translateY(-10px);
+  transition: opacity 0.2s ease, transform 0.2s ease;
+  z-index: 2147483647;
+}
+
+/* Verde per seek (rewind/advance) */
+#uv-feedback.uv-seek {
+  background: rgba(0, 200, 0, 0.9);
+  color: #ffffff;
+  box-shadow: 0 4px 12px rgba(0, 200, 0, 0.3);
+}
+
+/* Blu per speed (faster/slower) */
+#uv-feedback.uv-speed {
+  background: rgba(0, 120, 255, 0.9);
+  color: #ffffff;
+  box-shadow: 0 4px 12px rgba(0, 120, 255, 0.3);
+}
+
+/* Default color */
+#uv-feedback.uv-default {
+  background: rgba(0, 0, 0, 0.8);
+  color: #ffffff;
+}
+
+#uv-feedback.uv-visible {
+  opacity: 1;
+  transform: translateY(0);
+}
