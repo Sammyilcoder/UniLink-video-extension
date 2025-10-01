@@ -130,9 +130,86 @@ function log(message, level) {
   }
 }
 
-chrome.storage.sync.get(tc.settings, function (storage) {
-  const speedStep = Number(storage.speedStep) || 0.25;
-  const seekStep = Number(storage.rewindTime) || Number(storage.advanceTime) || 10;
+// Initialize storage with error handling
+function initializeSettings() {
+  if (typeof chrome === 'undefined' || !chrome.storage) {
+    log("Chrome storage API not available, using defaults", 3);
+    initializeWithDefaults();
+    return;
+  }
+
+  chrome.storage.sync.get(['speedStep', 'rewindTime', 'advanceTime', 'lastSpeed', 'displayKeyCode', 'rememberSpeed', 'forceLastSavedSpeed', 'audioBoolean', 'startHidden', 'controllerOpacity', 'blacklist'], function (storage) {
+    if (chrome.runtime.lastError) {
+      log("Storage error: " + chrome.runtime.lastError.message, 3);
+      initializeWithDefaults();
+      return;
+    }
+
+    if (!storage) {
+      log("Storage is undefined, using defaults", 3);
+      initializeWithDefaults();
+      return;
+    }
+
+    const speedStep = Number(storage.speedStep) || 0.25;
+    const seekStep = Number(storage.rewindTime) || Number(storage.advanceTime) || 10;
+
+    tc.settings.keyBindings = [
+      {
+        action: "rewind",
+        key: 37,
+        value: seekStep,
+        force: true,
+        predefined: true
+      },
+      {
+        action: "advance",
+        key: 39,
+        value: seekStep,
+        force: true,
+        predefined: true
+      },
+      {
+        action: "slower",
+        key: 40,
+        value: speedStep,
+        force: true,
+        predefined: true
+      },
+      {
+        action: "faster",
+        key: 38,
+        value: speedStep,
+        force: true,
+        predefined: true
+      }
+    ];
+
+    tc.settings.version = "0.6.4.0";
+
+    chrome.storage.sync.set({
+      keyBindings: tc.settings.keyBindings,
+      version: tc.settings.version
+    });
+
+    tc.settings.lastSpeed = Number(storage.lastSpeed) || 1.0;
+    tc.settings.displayKeyCode = Number(storage.displayKeyCode) || 86;
+    tc.settings.rememberSpeed = Boolean(storage.rememberSpeed);
+    tc.settings.forceLastSavedSpeed = Boolean(storage.forceLastSavedSpeed);
+    tc.settings.audioBoolean = Boolean(storage.audioBoolean);
+    tc.settings.enabled = true; // Always enabled
+    tc.settings.startHidden = Boolean(storage.startHidden);
+    tc.settings.controllerOpacity = Number(storage.controllerOpacity) || 0.3;
+    tc.settings.blacklist = String(storage.blacklist || tc.settings.blacklist);
+
+    initializeWhenReady(document);
+  });
+}
+
+function initializeWithDefaults() {
+  // Use default values when storage is not available
+  const speedStep = 0.25;
+  const seekStep = 10;
 
   tc.settings.keyBindings = [
     {
@@ -166,24 +243,20 @@ chrome.storage.sync.get(tc.settings, function (storage) {
   ];
 
   tc.settings.version = "0.6.4.0";
-
-  chrome.storage.sync.set({
-    keyBindings: tc.settings.keyBindings,
-    version: tc.settings.version
-  });
-
-  tc.settings.lastSpeed = Number(storage.lastSpeed);
-  tc.settings.displayKeyCode = Number(storage.displayKeyCode);
-  tc.settings.rememberSpeed = Boolean(storage.rememberSpeed);
-  tc.settings.forceLastSavedSpeed = Boolean(storage.forceLastSavedSpeed);
-  tc.settings.audioBoolean = Boolean(storage.audioBoolean);
-  tc.settings.enabled = true; // Always enabled
-  tc.settings.startHidden = Boolean(storage.startHidden);
-  tc.settings.controllerOpacity = Number(storage.controllerOpacity);
-  tc.settings.blacklist = String(storage.blacklist);
+  tc.settings.lastSpeed = 1.0;
+  tc.settings.displayKeyCode = 86;
+  tc.settings.rememberSpeed = false;
+  tc.settings.forceLastSavedSpeed = false;
+  tc.settings.audioBoolean = false;
+  tc.settings.enabled = true;
+  tc.settings.startHidden = false;
+  tc.settings.controllerOpacity = 0.3;
 
   initializeWhenReady(document);
-});
+}
+
+// Start initialization
+initializeSettings();
 
 // Clean old progress data on startup
 cleanOldProgressData();
@@ -198,29 +271,33 @@ window.addEventListener('beforeunload', function() {
 });
 
 // Listen for storage changes to update settings dynamically
-chrome.storage.onChanged.addListener(function(changes, namespace) {
-  if (namespace === 'sync') {
-    if (changes.rewindTime || changes.advanceTime || changes.speedStep) {
-      // Update key bindings when seek or speed steps change
-      const seekStep = changes.rewindTime ? changes.rewindTime.newValue : 
-                     changes.advanceTime ? changes.advanceTime.newValue :
-                     getKeyBindings("rewind", "value");
-      const speedStep = changes.speedStep ? changes.speedStep.newValue : 
-                       getKeyBindings("faster", "value");
-      
-      // Update the key bindings
-      tc.settings.keyBindings.forEach(binding => {
-        if (binding.action === "rewind" || binding.action === "advance") {
-          binding.value = Number(seekStep);
-        } else if (binding.action === "slower" || binding.action === "faster") {
-          binding.value = Number(speedStep);
+if (typeof chrome !== 'undefined' && chrome.storage) {
+  chrome.storage.onChanged.addListener(function(changes, namespace) {
+    if (namespace === 'sync') {
+      if (changes.rewindTime || changes.advanceTime || changes.speedStep) {
+        // Update key bindings when seek or speed steps change
+        const seekStep = changes.rewindTime ? changes.rewindTime.newValue : 
+                       changes.advanceTime ? changes.advanceTime.newValue :
+                       getKeyBindings("rewind", "value") || 10;
+        const speedStep = changes.speedStep ? changes.speedStep.newValue : 
+                         getKeyBindings("faster", "value") || 0.25;
+        
+        // Update the key bindings
+        if (tc.settings.keyBindings) {
+          tc.settings.keyBindings.forEach(binding => {
+            if (binding.action === "rewind" || binding.action === "advance") {
+              binding.value = Number(seekStep);
+            } else if (binding.action === "slower" || binding.action === "faster") {
+              binding.value = Number(speedStep);
+            }
+          });
         }
-      });
-      
-      log("Settings updated from storage changes", 4);
+        
+        log("Settings updated from storage changes", 4);
+      }
     }
-  }
-});
+  });
+}
 
 function getKeyBindings(action, what = "value") {
   const binding = tc.settings.keyBindings.find((item) => item.action === action);
@@ -260,18 +337,29 @@ function escapeStringRegExp(str) {
 function updateIcon(enabled) {
   const suffix = enabled ? ".png" : "_disabled.png";
   
-  // Try both Firefox and Chrome APIs
-  if (typeof browser !== 'undefined' && browser.browserAction) {
-    // Firefox
-    browser.browserAction.setIcon({
+  // Manifest V3 compatible API calls
+  if (typeof browser !== 'undefined' && browser.action) {
+    // Firefox with Manifest V3
+    browser.action.setIcon({
       path: {
+        "16": "icons/icon16" + suffix,
         "19": "icons/icon19" + suffix,
         "38": "icons/icon38" + suffix,
         "48": "icons/icon48" + suffix
       }
-    }).catch(err => log("Failed to update icon (Firefox): " + err, 3));
+    }).catch(err => log("Failed to update icon (Firefox V3): " + err, 3));
+  } else if (typeof chrome !== 'undefined' && chrome.action) {
+    // Chrome/Edge with Manifest V3
+    chrome.action.setIcon({
+      path: {
+        "16": "icons/icon16" + suffix,
+        "19": "icons/icon19" + suffix,
+        "38": "icons/icon38" + suffix,
+        "48": "icons/icon48" + suffix
+      }
+    });
   } else if (typeof chrome !== 'undefined' && chrome.browserAction) {
-    // Chrome
+    // Fallback for older versions (Manifest V2)
     chrome.browserAction.setIcon({
       path: {
         "19": "icons/icon19" + suffix,
@@ -349,9 +437,16 @@ function setupListener() {
     log("Storing lastSpeed in settings for the rememberSpeed feature", 5);
     tc.settings.lastSpeed = speed;
     log("Syncing chrome settings for lastSpeed", 5);
-    chrome.storage.sync.set({ lastSpeed: speed }, function () {
-      log("Speed setting saved: " + speed, 5);
-    });
+    
+    if (typeof chrome !== 'undefined' && chrome.storage) {
+      chrome.storage.sync.set({ lastSpeed: speed }, function () {
+        if (chrome.runtime.lastError) {
+          log("Error saving speed: " + chrome.runtime.lastError.message, 3);
+        } else {
+          log("Speed setting saved: " + speed, 5);
+        }
+      });
+    }
   }
 
   document.addEventListener(
@@ -814,22 +909,33 @@ function saveVideoProgress(video) {
     videoProgress[videoId] = progressData;
 
     // Save to storage
-    const storageKey = `video_progress_${videoId}`;
-    chrome.storage.local.set({
-      [storageKey]: progressData
-    }, function() {
-      log(`Progress saved for video ${videoId}: ${Math.round(currentTime)}s`, 4);
-    });
+    if (typeof chrome !== 'undefined' && chrome.storage) {
+      const storageKey = `video_progress_${videoId}`;
+      chrome.storage.local.set({
+        [storageKey]: progressData
+      }, function() {
+        if (chrome.runtime.lastError) {
+          log(`Error saving progress: ${chrome.runtime.lastError.message}`, 3);
+        } else {
+          log(`Progress saved for video ${videoId}: ${Math.round(currentTime)}s`, 4);
+        }
+      });
+    }
   }
 }
 
 function restoreVideoProgress(video) {
   const videoId = getVideoId(video);
-  if (!videoId) return;
+  if (!videoId || typeof chrome === 'undefined' || !chrome.storage) return;
 
   const storageKey = `video_progress_${videoId}`;
   chrome.storage.local.get([storageKey], function(result) {
-    const progressData = result[storageKey];
+    if (chrome.runtime.lastError) {
+      log(`Error loading progress: ${chrome.runtime.lastError.message}`, 3);
+      return;
+    }
+
+    const progressData = result && result[storageKey];
     if (progressData) {
       const now = Date.now();
       const monthInMs = 30 * 24 * 60 * 60 * 1000; // 30 giorni
@@ -894,7 +1000,14 @@ function stopProgressTracking(video) {
 }
 
 function cleanOldProgressData() {
+  if (typeof chrome === 'undefined' || !chrome.storage) return;
+  
   chrome.storage.local.get(null, function(items) {
+    if (chrome.runtime.lastError) {
+      log(`Error cleaning progress data: ${chrome.runtime.lastError.message}`, 3);
+      return;
+    }
+
     const now = Date.now();
     const monthInMs = 30 * 24 * 60 * 60 * 1000; // 30 giorni
     const keysToRemove = [];
@@ -910,7 +1023,11 @@ function cleanOldProgressData() {
     
     if (keysToRemove.length > 0) {
       chrome.storage.local.remove(keysToRemove, function() {
-        log(`Cleaned ${keysToRemove.length} old progress entries`, 4);
+        if (chrome.runtime.lastError) {
+          log(`Error removing old progress data: ${chrome.runtime.lastError.message}`, 3);
+        } else {
+          log(`Cleaned ${keysToRemove.length} old progress entries`, 4);
+        }
       });
     }
   });

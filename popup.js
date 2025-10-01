@@ -19,10 +19,24 @@ document.addEventListener("DOMContentLoaded", function () {
   saveButton.addEventListener('click', saveSettings);
 
   function loadSettings() {
-    chrome.storage.sync.get(defaults, function(storage) {
-      seekStepInput.value = storage.rewindTime || defaults.rewindTime;
-      speedStepInput.value = storage.speedStep || defaults.speedStep;
-    });
+    if (typeof chrome !== 'undefined' && chrome.storage) {
+      chrome.storage.sync.get(defaults, function(storage) {
+        if (chrome.runtime.lastError) {
+          console.log("Error loading settings:", chrome.runtime.lastError.message);
+          // Use defaults if error
+          seekStepInput.value = defaults.rewindTime;
+          speedStepInput.value = defaults.speedStep;
+          return;
+        }
+        
+        seekStepInput.value = storage.rewindTime || defaults.rewindTime;
+        speedStepInput.value = storage.speedStep || defaults.speedStep;
+      });
+    } else {
+      // Fallback to defaults if chrome.storage not available
+      seekStepInput.value = defaults.rewindTime;
+      speedStepInput.value = defaults.speedStep;
+    }
   }
 
   function resetToDefaults() {
@@ -36,8 +50,8 @@ document.addEventListener("DOMContentLoaded", function () {
     const speedStep = parseFloat(speedStepInput.value);
 
     // Validation
-    if (seekStep < 1 || seekStep > 60) {
-      showStatus('Skip step must be between 1 and 60 seconds', 'error');
+    if (seekStep < 1 || seekStep > 500) {
+      showStatus('Skip step must be between 1 and 500 seconds', 'error');
       return;
     }
 
@@ -47,18 +61,28 @@ document.addEventListener("DOMContentLoaded", function () {
     }
 
     // Save to storage
-    chrome.storage.sync.set({
-      rewindTime: seekStep,
-      advanceTime: seekStep, // Keep both for compatibility
-      speedStep: speedStep
-    }, function() {
-      showStatus('Settings saved successfully!', 'success');
-      
-      // Hide status after 2 seconds
-      setTimeout(() => {
-        hideStatus();
-      }, 2000);
-    });
+    if (typeof chrome !== 'undefined' && chrome.storage) {
+      chrome.storage.sync.set({
+        rewindTime: seekStep,
+        advanceTime: seekStep, // Keep both for compatibility
+        speedStep: speedStep
+      }, function() {
+        if (chrome.runtime.lastError) {
+          console.log("Error saving settings:", chrome.runtime.lastError.message);
+          showStatus('Error saving settings!', 'error');
+          return;
+        }
+        
+        showStatus('Settings saved successfully!', 'success');
+        
+        // Hide status after 2 seconds
+        setTimeout(() => {
+          hideStatus();
+        }, 2000);
+      });
+    } else {
+      showStatus('Storage not available!', 'error');
+    }
   }
 
   function showStatus(message, type) {
