@@ -185,6 +185,18 @@ chrome.storage.sync.get(tc.settings, function (storage) {
   initializeWhenReady(document);
 });
 
+// Clean old progress data on startup
+cleanOldProgressData();
+
+// Save progress before page unload
+window.addEventListener('beforeunload', function() {
+  tc.mediaElements.forEach(function(video) {
+    if (video.nodeName === "VIDEO") {
+      saveVideoProgress(video);
+    }
+  });
+});
+
 // Listen for storage changes to update settings dynamically
 chrome.storage.onChanged.addListener(function(changes, namespace) {
   if (namespace === 'sync') {
@@ -514,12 +526,29 @@ function initializeNow(document) {
         // Just add to mediaElements array, no controller needed
         if (!tc.mediaElements.includes(node)) {
           tc.mediaElements.push(node);
+          
+          // Start progress tracking for this video
+          if (node.nodeName === "VIDEO") {
+            // Wait for video to load metadata before trying to restore progress
+            if (node.readyState >= 1) {
+              restoreVideoProgress(node);
+              startProgressTracking(node);
+            } else {
+              node.addEventListener('loadedmetadata', function() {
+                restoreVideoProgress(node);
+                startProgressTracking(node);
+              }, { once: true });
+            }
+          }
         }
       } else {
-        // Remove from mediaElements array
+        // Remove from mediaElements array and stop tracking
         let idx = tc.mediaElements.indexOf(node);
         if (idx != -1) {
           tc.mediaElements.splice(idx, 1);
+          if (node.nodeName === "VIDEO") {
+            stopProgressTracking(node);
+          }
         }
       }
     } else if (node.children != undefined) {
@@ -582,6 +611,19 @@ function initializeNow(document) {
     // Just add to mediaElements array, no controller needed
     if (!tc.mediaElements.includes(video)) {
       tc.mediaElements.push(video);
+      
+      // Start progress tracking for existing videos
+      if (video.nodeName === "VIDEO") {
+        if (video.readyState >= 1) {
+          restoreVideoProgress(video);
+          startProgressTracking(video);
+        } else {
+          video.addEventListener('loadedmetadata', function() {
+            restoreVideoProgress(video);
+            startProgressTracking(video);
+          }, { once: true });
+        }
+      }
     }
   });
 
@@ -728,6 +770,151 @@ function muted(v) {
 
 // Store video marks in a simple object
 var videoMarks = {};
+
+// Video progress tracking
+var videoProgress = {};
+var progressSaveInterval = 5000; // Save every 5 seconds
+var progressTimers = new WeakMap();
+
+function getVideoId(video) {
+  // Use the video URL as unique identifier
+  const src = video.currentSrc || video.src;
+  if (src) {
+    // Extract entry ID from URL if available
+    const entryMatch = src.match(/entryId\/([^\/]+)/);
+    if (entryMatch) {
+      return entryMatch[1];
+    }
+    // Fallback to full URL
+    return src;
+  }
+  return null;
+}
+
+function saveVideoProgress(video) {
+  const videoId = getVideoId(video);
+  if (!videoId || !video.duration || video.duration < 30) {
+    return; // Don't save for very short videos
+  }
+
+  const currentTime = video.currentTime;
+  const duration = video.duration;
+  const progress = currentTime / duration;
+
+  // Only save if we're not at the very beginning or very end
+  if (currentTime > 10 && progress < 0.95) {
+    const progressData = {
+      currentTime: currentTime,
+      duration: duration,
+      timestamp: Date.now(),
+      url: window.location.href
+    };
+
+    // Save to memory
+    videoProgress[videoId] = progressData;
+
+    // Save to storage
+    const storageKey = `video_progress_${videoId}`;
+    chrome.storage.local.set({
+      [storageKey]: progressData
+    }, function() {
+      log(`Progress saved for video ${videoId}: ${Math.round(currentTime)}s`, 4);
+    });
+  }
+}
+
+function restoreVideoProgress(video) {
+  const videoId = getVideoId(video);
+  if (!videoId) return;
+
+  const storageKey = `video_progress_${videoId}`;
+  chrome.storage.local.get([storageKey], function(result) {
+    const progressData = result[storageKey];
+    if (progressData) {
+      const now = Date.now();
+      const monthInMs = 30 * 24 * 60 * 60 * 1000; // 30 giorni
+      
+      // Check if data is older than 1 month
+      if (now - progressData.timestamp > monthInMs) {
+        // Remove old data
+        chrome.storage.local.remove([storageKey]);
+        log(`Old progress data removed for video ${videoId}`, 4);
+        return;
+      }
+      
+      // Restore progress automatically (only if more than 30 seconds from start)
+      if (progressData.currentTime > 30) {
+        video.currentTime = progressData.currentTime;
+        log(`Progress restored for video ${videoId}: ${Math.round(progressData.currentTime)}s`, 4);
+        
+        const doc = video.ownerDocument || document;
+        const minutes = Math.floor(progressData.currentTime / 60);
+        const seconds = Math.floor(progressData.currentTime % 60);
+        showFeedback(doc, `Ripreso da ${minutes}:${seconds.toString().padStart(2, '0')}`, 'default');
+      }
+    }
+  });
+}
+
+function startProgressTracking(video) {
+  // Clear any existing timer
+  const existingTimer = progressTimers.get(video);
+  if (existingTimer) {
+    clearInterval(existingTimer);
+  }
+
+  // Start new timer
+  const timer = setInterval(() => {
+    if (!video.paused && !video.ended) {
+      saveVideoProgress(video);
+    }
+  }, progressSaveInterval);
+
+  progressTimers.set(video, timer);
+
+  // Also save on pause and before unload
+  video.addEventListener('pause', () => saveVideoProgress(video));
+  video.addEventListener('ended', () => {
+    // Clear progress when video ends
+    const videoId = getVideoId(video);
+    if (videoId) {
+      const storageKey = `video_progress_${videoId}`;
+      chrome.storage.local.remove([storageKey]);
+      log(`Progress cleared for completed video ${videoId}`, 4);
+    }
+  });
+}
+
+function stopProgressTracking(video) {
+  const timer = progressTimers.get(video);
+  if (timer) {
+    clearInterval(timer);
+    progressTimers.delete(video);
+  }
+}
+
+function cleanOldProgressData() {
+  chrome.storage.local.get(null, function(items) {
+    const now = Date.now();
+    const monthInMs = 30 * 24 * 60 * 60 * 1000; // 30 giorni
+    const keysToRemove = [];
+    
+    for (const key in items) {
+      if (key.startsWith('video_progress_')) {
+        const data = items[key];
+        if (data && data.timestamp && (now - data.timestamp > monthInMs)) {
+          keysToRemove.push(key);
+        }
+      }
+    }
+    
+    if (keysToRemove.length > 0) {
+      chrome.storage.local.remove(keysToRemove, function() {
+        log(`Cleaned ${keysToRemove.length} old progress entries`, 4);
+      });
+    }
+  });
+}
 
 function setMark(v) {
   log("Adding marker", 5);
