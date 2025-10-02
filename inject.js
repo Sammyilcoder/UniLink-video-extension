@@ -1,6 +1,4 @@
-﻿var regStrip = /^[\r\t\f\v ]+|[\r\t\f\v ]+$/gm;
-
-var tc = {
+﻿var tc = {
   settings: {
     lastSpeed: 1.0, // default 1x
     enabled: true, // default enabled
@@ -13,13 +11,6 @@ var tc = {
     startHidden: false, // default: false
     controllerOpacity: 0.3, // default: 0.3
     keyBindings: [],
-    blacklist: `\
-      www.instagram.com
-      twitter.com
-      vine.co
-      imgur.com
-      teams.microsoft.com
-    `.replace(regStrip, ""),
     defaultLogLevel: 4,
     logLevel: 3
   },
@@ -138,7 +129,7 @@ function initializeSettings() {
     return;
   }
 
-  chrome.storage.sync.get(['speedStep', 'rewindTime', 'advanceTime', 'lastSpeed', 'displayKeyCode', 'rememberSpeed', 'forceLastSavedSpeed', 'audioBoolean', 'startHidden', 'controllerOpacity', 'blacklist'], function (storage) {
+  chrome.storage.sync.get(['speedStep', 'rewindTime', 'advanceTime', 'lastSpeed', 'displayKeyCode', 'rememberSpeed', 'forceLastSavedSpeed', 'audioBoolean', 'startHidden', 'controllerOpacity'], function (storage) {
     if (chrome.runtime.lastError) {
       log("Storage error: " + chrome.runtime.lastError.message, 3);
       initializeWithDefaults();
@@ -200,7 +191,6 @@ function initializeSettings() {
     tc.settings.enabled = true; // Always enabled
     tc.settings.startHidden = Boolean(storage.startHidden);
     tc.settings.controllerOpacity = Number(storage.controllerOpacity) || 0.3;
-    tc.settings.blacklist = String(storage.blacklist || tc.settings.blacklist);
 
     initializeWhenReady(document);
   });
@@ -329,84 +319,6 @@ function setKeyBindings(action, value) {
   }
 }
 
-function escapeStringRegExp(str) {
-  matchOperatorsRe = /[|\\{}()[\]^$+*?.]/g;
-  return str.replace(matchOperatorsRe, "\\$&");
-}
-
-function updateIcon(enabled) {
-  const suffix = enabled ? ".png" : "_disabled.png";
-  
-  // Manifest V3 compatible API calls
-  if (typeof browser !== 'undefined' && browser.action) {
-    // Firefox with Manifest V3
-    browser.action.setIcon({
-      path: {
-        "16": "icons/icon16" + suffix,
-        "19": "icons/icon19" + suffix,
-        "38": "icons/icon38" + suffix,
-        "48": "icons/icon48" + suffix
-      }
-    }).catch(err => log("Failed to update icon (Firefox V3): " + err, 3));
-  } else if (typeof chrome !== 'undefined' && chrome.action) {
-    // Chrome/Edge with Manifest V3
-    chrome.action.setIcon({
-      path: {
-        "16": "icons/icon16" + suffix,
-        "19": "icons/icon19" + suffix,
-        "38": "icons/icon38" + suffix,
-        "48": "icons/icon48" + suffix
-      }
-    });
-  } else if (typeof chrome !== 'undefined' && chrome.browserAction) {
-    // Fallback for older versions (Manifest V2)
-    chrome.browserAction.setIcon({
-      path: {
-        "19": "icons/icon19" + suffix,
-        "38": "icons/icon38" + suffix,
-        "48": "icons/icon48" + suffix
-      }
-    });
-  }
-  
-  log(`Icon updated to ${enabled ? 'enabled' : 'disabled'}`, 4);
-}
-
-function isBlacklisted() {
-  // Since we're now using specific domains in manifest, always enable
-  updateIcon(true);
-  
-  // Original blacklist logic (kept for compatibility)
-  blacklisted = false;
-  tc.settings.blacklist.split("\n").forEach((match) => {
-    match = match.replace(regStrip, "");
-    if (match.length == 0) {
-      return;
-    }
-
-    if (match.startsWith("/")) {
-      try {
-        var regexp = new RegExp(match);
-      } catch (err) {
-        return;
-      }
-    } else {
-      var regexp = new RegExp(escapeStringRegExp(match));
-    }
-
-    if (regexp.test(location.href)) {
-      blacklisted = true;
-      return;
-    }
-  });
-  
-  if (blacklisted) {
-    updateIcon(false); // Set disabled icon if blacklisted
-  }
-  
-  return blacklisted;
-}
-
 var coolDown = false;
 function refreshCoolDown() {
   log("Begin refreshCoolDown", 5);
@@ -480,10 +392,6 @@ function setupListener() {
 
 function initializeWhenReady(document) {
   log("Begin initializeWhenReady", 5);
-  if (isBlacklisted()) {
-    log("Extension disabled (blacklisted)", 4);
-    return;
-  }
   log("Extension enabled", 4);
   window.addEventListener('load', () => {
     initializeNow(window.document);
